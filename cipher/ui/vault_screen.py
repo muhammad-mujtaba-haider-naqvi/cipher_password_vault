@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import database
 import auth
 import crypto
+import master_auth
 import clipboard_manager
 from cryptography.exceptions import InvalidTag
 from ui import theme
@@ -101,7 +102,18 @@ class VaultScreen(ctk.CTkFrame):
             width=44,
             **theme.get_button_secondary_config()
         )
-        logout_button.pack(side="left")
+        logout_button.pack(side="left", padx=(0, theme.PADDING_SMALL))
+        
+        delete_button = ctk.CTkButton(
+            button_frame,
+            text="🗑",
+            command=self._delete_vault,
+            width=44,
+            fg_color="#C41C3B",
+            hover_color="#B21633",
+            text_color="#FFFFFF"
+        )
+        delete_button.pack(side="left")
         
         # Separator
         separator = ctk.CTkFrame(self, height=1, fg_color=theme.BG_BORDER)
@@ -387,6 +399,144 @@ class VaultScreen(ctk.CTkFrame):
             command=lambda: [database.delete_credential(credential_id), dialog.destroy(), self.refresh()],
             **theme.get_button_danger_config(),
             width=100
+        )
+        delete_btn.pack(side="left", padx=theme.PADDING_SMALL)
+    
+    def _delete_vault(self):
+        """Delete entire vault after master password verification."""
+        # Create password entry dialog
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Delete Vault")
+        dialog.geometry("480x420")
+        dialog.resizable(False, False)
+        dialog.configure(fg_color=theme.BG_PRIMARY)
+        dialog.attributes("-topmost", True)
+        dialog.grab_set()
+        dialog.focus()
+        
+        # Create scrollable frame for content
+        scroll_frame = ctk.CTkScrollableFrame(
+            dialog,
+            fg_color=theme.BG_PRIMARY
+        )
+        scroll_frame.pack(fill="both", expand=True, padx=theme.PADDING_NORMAL, pady=theme.PADDING_NORMAL)
+        
+        # Warning message
+        warning = ctk.CTkLabel(
+            scroll_frame,
+            text="⚠️  DELETE VAULT",
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_LARGE, "bold"),
+            text_color="#C41C3B"
+        )
+        warning.pack(pady=(theme.PADDING_XLARGE, theme.PADDING_NORMAL))
+        
+        # Description
+        desc = ctk.CTkLabel(
+            scroll_frame,
+            text="This will permanently delete all credentials\nand the master password.",
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_SMALL),
+            text_color=theme.TEXT_SECONDARY,
+            justify="center"
+        )
+        desc.pack(pady=(0, theme.PADDING_NORMAL))
+        
+        # Master password field
+        password_label = ctk.CTkLabel(
+            scroll_frame,
+            text="Master Password:",
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_NORMAL),
+            text_color=theme.TEXT_PRIMARY
+        )
+        password_label.pack(anchor="w", padx=theme.PADDING_XLARGE)
+        
+        password_entry = ctk.CTkEntry(
+            scroll_frame,
+            placeholder_text="Enter master password",
+            show="•",
+            **theme.get_input_config()
+        )
+        password_entry.pack(fill="x", padx=theme.PADDING_XLARGE, pady=(0, theme.PADDING_NORMAL))
+        
+        # Error label
+        error_label = ctk.CTkLabel(
+            scroll_frame,
+            text="",
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_SMALL),
+            text_color=theme.DANGER_RED
+        )
+        error_label.pack(pady=theme.PADDING_NORMAL)
+        
+        # Bottom button frame (fixed at bottom, not scrollable)
+        button_frame = ctk.CTkFrame(dialog, fg_color=theme.BG_PRIMARY)
+        button_frame.pack(fill="x", side="bottom", padx=theme.PADDING_NORMAL, pady=theme.PADDING_NORMAL, anchor="center")
+        
+        def verify_and_delete():
+            """Verify password and delete vault."""
+            try:
+                password = password_entry.get()
+                
+                if not password:
+                    error_label.configure(text="Please enter master password")
+                    return
+                
+                # Verify master password
+                if not master_auth.verify_master_password(password):
+                    error_label.configure(text="Incorrect master password")
+                    password_entry.delete(0, "end")
+                    return
+                
+                # Password verified - delete vault
+                database.wipe_vault()
+                auth.lock_session()
+                dialog.destroy()
+                
+                # Show confirmation
+                confirm_dialog = ctk.CTkToplevel(self)
+                confirm_dialog.title("Vault Deleted")
+                confirm_dialog.geometry("320x150")
+                confirm_dialog.resizable(False, False)
+                confirm_dialog.configure(fg_color=theme.BG_PRIMARY)
+                confirm_dialog.attributes("-topmost", True)
+                confirm_dialog.grab_set()
+                confirm_dialog.focus()
+                
+                msg = ctk.CTkLabel(
+                    confirm_dialog,
+                    text="✓ Vault deleted successfully!\n\nApp will reset to setup.",
+                    font=(theme.FONT_FAMILY, theme.FONT_SIZE_NORMAL),
+                    text_color=theme.SUCCESS_GREEN,
+                    justify="center"
+                )
+                msg.pack(pady=theme.PADDING_XLARGE)
+                
+                ok_btn = ctk.CTkButton(
+                    confirm_dialog,
+                    text="OK",
+                    command=lambda: [confirm_dialog.destroy(), self.on_logout()],
+                    **theme.get_button_primary_config(),
+                    width=100
+                )
+                ok_btn.pack(pady=(0, theme.PADDING_NORMAL))
+            except Exception as e:
+                error_label.configure(text=f"Error: {str(e)}")
+        
+        cancel_btn = ctk.CTkButton(
+            button_frame,
+            text="Cancel",
+            command=dialog.destroy,
+            **theme.get_button_secondary_config(),
+            width=100
+        )
+        cancel_btn.pack(side="left", padx=theme.PADDING_SMALL)
+        
+        delete_btn = ctk.CTkButton(
+            button_frame,
+            text="DELETE VAULT",
+            command=verify_and_delete,
+            fg_color="#C41C3B",
+            hover_color="#B21633",
+            text_color="#FFFFFF",
+            width=150
         )
         delete_btn.pack(side="left", padx=theme.PADDING_SMALL)
     

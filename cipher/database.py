@@ -396,3 +396,21 @@ def get_credential_count() -> int:
     conn.close()
     
     return count
+
+
+def wipe_vault() -> None:
+    """
+    Completely wipe the vault: delete all credentials and master password configuration.
+    This resets the app to fresh state as if no master password was ever set.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Delete all credentials from vault
+    cursor.execute("DELETE FROM vault")
+    
+    # Delete master password configuration
+    cursor.execute("DELETE FROM master_config")
+    
+    conn.commit()
+    conn.close()
