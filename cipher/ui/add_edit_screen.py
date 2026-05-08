@@ -14,6 +14,7 @@ import database
 import auth
 import crypto
 import strength
+from cryptography.exceptions import InvalidTag
 from ui import theme
 
 
@@ -313,13 +314,22 @@ class AddEditScreen(ctk.CTkFrame):
         if not cred or not auth.session.aes_key:
             return
         
-        # Decrypt password
-        password = crypto.decrypt_password(
-            cred['encrypted_password'],
-            cred['iv'],
-            cred['tag'],
-            auth.session.aes_key
-        )
+        try:
+            password = crypto.decrypt_password(
+                cred['encrypted_password'],
+                cred['iv'],
+                cred['tag'],
+                auth.session.aes_key
+            )
+        except InvalidTag:
+            self._show_error(
+                "Unable to decrypt this credential password. "
+                "It may have been created with a different master password."
+            )
+            return
+        except Exception as e:
+            self._show_error(f"Error loading credential: {e}")
+            return
         
         self.credential_id = credential_id
         self.is_editing = True

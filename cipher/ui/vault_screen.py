@@ -14,6 +14,7 @@ import database
 import auth
 import crypto
 import clipboard_manager
+from cryptography.exceptions import InvalidTag
 from ui import theme
 
 
@@ -148,12 +149,26 @@ class VaultScreen(ctk.CTkFrame):
     
     def _render_credentials(self):
         """Render credential list based on current data."""
+        # Cancel all pending countdown timers before destroying widgets
+        for timer_id in list(self.copy_timers.values()):
+            try:
+                self.after_cancel(timer_id)
+            except:
+                pass
+        self.copy_timers.clear()
+        
         # Clear previous widgets
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         
         if not self.credentials:
-            self.empty_label.pack(pady=theme.PADDING_XLARGE)
+            empty_label = ctk.CTkLabel(
+                self.scrollable_frame,
+                text="No credentials stored yet. Click '+ ADD' to add your first entry.",
+                font=(theme.FONT_FAMILY, theme.FONT_SIZE_NORMAL),
+                text_color=theme.TEXT_SECONDARY
+            )
+            empty_label.pack(pady=theme.PADDING_XLARGE)
             self.footer_label.configure(text="0 entries stored")
             return
         
@@ -262,8 +277,13 @@ class VaultScreen(ctk.CTkFrame):
             
             # Copy to clipboard with auto-clear
             def on_cleared():
-                copy_button.configure(text="📋 Copy", text_color=theme.TEXT_SECONDARY)
-                countdown_label.configure(text="")
+                try:
+                    if copy_button.winfo_exists():
+                        copy_button.configure(text="📋 Copy", text_color=theme.TEXT_SECONDARY)
+                    if countdown_label.winfo_exists():
+                        countdown_label.configure(text="")
+                except:
+                    pass
             
             clipboard_manager.copy_with_auto_clear(password, 30, on_cleared)
             
@@ -273,19 +293,62 @@ class VaultScreen(ctk.CTkFrame):
             # Start countdown
             def countdown(remaining=30):
                 if remaining > 0:
-                    countdown_label.configure(text=f"Clears in {remaining}s")
-                    self.copy_timers[credential_id] = self.after(
-                        1000,
-                        lambda: countdown(remaining - 1)
-                    )
+                    # Check if label widget still exists before updating
+                    try:
+                        if countdown_label.winfo_exists():
+                            countdown_label.configure(text=f"Clears in {remaining}s")
+                            self.copy_timers[credential_id] = self.after(
+                                1000,
+                                lambda: countdown(remaining - 1)
+                            )
+                    except:
+                        pass
                 else:
-                    countdown_label.configure(text="")
+                    try:
+                        if countdown_label.winfo_exists():
+                            countdown_label.configure(text="")
+                    except:
+                        pass
             
             countdown()
             
-        except Exception as e:
-            print(f"Error copying password: {e}")
+        except InvalidTag:
+            self._show_error_dialog(
+                "Unable to decrypt this password.\n"
+                "It may have been encrypted with a different master password."
+            )
+        except Exception:
+            self._show_error_dialog("Unable to copy password right now. Please try again.")
     
+    def _show_error_dialog(self, message: str):
+        """Show an error dialog in the vault screen."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Error")
+        dialog.geometry("360x130")
+        dialog.resizable(False, False)
+        dialog.configure(fg_color=theme.BG_PRIMARY)
+        dialog.attributes("-topmost", True)
+        dialog.grab_set()
+        dialog.focus()
+
+        label = ctk.CTkLabel(
+            dialog,
+            text=message,
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_NORMAL),
+            text_color=theme.DANGER_RED,
+            justify="center"
+        )
+        label.pack(pady=theme.PADDING_XLARGE)
+
+        ok_btn = ctk.CTkButton(
+            dialog,
+            text="OK",
+            command=dialog.destroy,
+            **theme.get_button_primary_config(),
+            width=100
+        )
+        ok_btn.pack(pady=(0, theme.PADDING_NORMAL))
+
     def _delete_credential(self, credential_id: int):
         """Delete a credential after confirmation."""
         # Create confirmation dialog
@@ -294,6 +357,9 @@ class VaultScreen(ctk.CTkFrame):
         dialog.geometry("300x150")
         dialog.resizable(False, False)
         dialog.configure(fg_color=theme.BG_PRIMARY)
+        dialog.attributes("-topmost", True)
+        dialog.grab_set()
+        dialog.focus()
         
         msg = ctk.CTkLabel(
             dialog,

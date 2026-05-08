@@ -34,7 +34,7 @@ class GeneratorPopup(ctk.CTkToplevel):
         self.generated_password = ""
         
         self.title("Password Generator")
-        self.geometry("400x500")
+        self.geometry("480x700")
         self.resizable(False, False)
         self.configure(fg_color=theme.BG_PRIMARY)
         
@@ -161,6 +161,14 @@ class GeneratorPopup(ctk.CTkToplevel):
         )
         self.password_display.pack(fill="x", pady=(0, theme.PADDING_NORMAL))
         self.password_display.configure(state="readonly")
+
+        use_now_button = ctk.CTkButton(
+            container,
+            text="Use Password in Form",
+            command=self._use_password,
+            **theme.get_button_primary_config()
+        )
+        use_now_button.pack(fill="x", pady=(0, theme.PADDING_NORMAL))
         
         # Strength meter for generated password
         strength_frame = ctk.CTkFrame(container, fg_color=theme.BG_PRIMARY)
@@ -186,7 +194,7 @@ class GeneratorPopup(ctk.CTkToplevel):
         
         # Buttons
         button_frame = ctk.CTkFrame(container, fg_color=theme.BG_PRIMARY)
-        button_frame.pack(fill="x", pady=(theme.PADDING_XLARGE, 0))
+        button_frame.pack(fill="x", pady=(theme.PADDING_NORMAL, 0))
         
         regen_button = ctk.CTkButton(
             button_frame,
