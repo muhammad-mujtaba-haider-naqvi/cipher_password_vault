@@ -17,39 +17,67 @@ def ensure_db_exists():
     """Create .cipher directory and initialize database if it doesn't exist."""
     db_dir = Path.home() / ".cipher"
     db_dir.mkdir(exist_ok=True)
-    
-    if not os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Master config table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS master_config (
-                id INTEGER PRIMARY KEY,
-                password_hash TEXT NOT NULL,
-                salt TEXT NOT NULL,
-                pbkdf2_salt TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Vault credentials table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS vault (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                website TEXT NOT NULL,
-                username TEXT NOT NULL,
-                encrypted_password TEXT NOT NULL,
-                iv TEXT NOT NULL,
-                tag TEXT NOT NULL,
-                notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Master config table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS master_config (
+            id INTEGER PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            pbkdf2_salt TEXT NOT NULL,
+            recovery_question TEXT,
+            recovery_answer_hash TEXT,
+            recovery_answer_salt TEXT,
+            recovery_kdf_salt TEXT,
+            wrapped_vault_key_master TEXT,
+            wrapped_vault_key_master_iv TEXT,
+            wrapped_vault_key_master_tag TEXT,
+            wrapped_vault_key_recovery TEXT,
+            wrapped_vault_key_recovery_iv TEXT,
+            wrapped_vault_key_recovery_tag TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Vault credentials table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS vault (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            website TEXT NOT NULL,
+            username TEXT NOT NULL,
+            encrypted_password TEXT NOT NULL,
+            iv TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Lightweight migration for users with an older master_config schema.
+    cursor.execute("PRAGMA table_info(master_config)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    required_columns = {
+        'recovery_question': 'TEXT',
+        'recovery_answer_hash': 'TEXT',
+        'recovery_answer_salt': 'TEXT',
+        'recovery_kdf_salt': 'TEXT',
+        'wrapped_vault_key_master': 'TEXT',
+        'wrapped_vault_key_master_iv': 'TEXT',
+        'wrapped_vault_key_master_tag': 'TEXT',
+        'wrapped_vault_key_recovery': 'TEXT',
+        'wrapped_vault_key_recovery_iv': 'TEXT',
+        'wrapped_vault_key_recovery_tag': 'TEXT',
+    }
+    for column_name, column_type in required_columns.items():
+        if column_name not in existing_columns:
+            cursor.execute(f"ALTER TABLE master_config ADD COLUMN {column_name} {column_type}")
+
+    conn.commit()
+    conn.close()
 
 
 def get_connection() -> sqlite3.Connection:
@@ -64,7 +92,21 @@ def get_connection() -> sqlite3.Connection:
 # MASTER CONFIG OPERATIONS
 # ============================================================================
 
-def set_master_password(password_hash: str, salt: str, pbkdf2_salt: str) -> None:
+def set_master_password(
+    password_hash: str,
+    salt: str,
+    pbkdf2_salt: str,
+    recovery_question: str = None,
+    recovery_answer_hash: str = None,
+    recovery_answer_salt: str = None,
+    recovery_kdf_salt: str = None,
+    wrapped_vault_key_master: str = None,
+    wrapped_vault_key_master_iv: str = None,
+    wrapped_vault_key_master_tag: str = None,
+    wrapped_vault_key_recovery: str = None,
+    wrapped_vault_key_recovery_iv: str = None,
+    wrapped_vault_key_recovery_tag: str = None,
+) -> None:
     """
     Store master password hash and salts. Creates new entry or updates existing.
     
@@ -80,13 +122,61 @@ def set_master_password(password_hash: str, salt: str, pbkdf2_salt: str) -> None
     cursor.execute("SELECT id FROM master_config LIMIT 1")
     if cursor.fetchone():
         cursor.execute(
-            "UPDATE master_config SET password_hash = ?, salt = ?, pbkdf2_salt = ?",
-            (password_hash, salt, pbkdf2_salt)
+            """UPDATE master_config SET
+               password_hash = ?,
+               salt = ?,
+               pbkdf2_salt = ?,
+               recovery_question = COALESCE(?, recovery_question),
+               recovery_answer_hash = COALESCE(?, recovery_answer_hash),
+               recovery_answer_salt = COALESCE(?, recovery_answer_salt),
+               recovery_kdf_salt = COALESCE(?, recovery_kdf_salt),
+               wrapped_vault_key_master = COALESCE(?, wrapped_vault_key_master),
+               wrapped_vault_key_master_iv = COALESCE(?, wrapped_vault_key_master_iv),
+               wrapped_vault_key_master_tag = COALESCE(?, wrapped_vault_key_master_tag),
+               wrapped_vault_key_recovery = COALESCE(?, wrapped_vault_key_recovery),
+               wrapped_vault_key_recovery_iv = COALESCE(?, wrapped_vault_key_recovery_iv),
+               wrapped_vault_key_recovery_tag = COALESCE(?, wrapped_vault_key_recovery_tag)
+            """,
+            (
+                password_hash,
+                salt,
+                pbkdf2_salt,
+                recovery_question,
+                recovery_answer_hash,
+                recovery_answer_salt,
+                recovery_kdf_salt,
+                wrapped_vault_key_master,
+                wrapped_vault_key_master_iv,
+                wrapped_vault_key_master_tag,
+                wrapped_vault_key_recovery,
+                wrapped_vault_key_recovery_iv,
+                wrapped_vault_key_recovery_tag,
+            )
         )
     else:
         cursor.execute(
-            "INSERT INTO master_config (password_hash, salt, pbkdf2_salt) VALUES (?, ?, ?)",
-            (password_hash, salt, pbkdf2_salt)
+            """INSERT INTO master_config (
+               password_hash, salt, pbkdf2_salt,
+               recovery_question, recovery_answer_hash, recovery_answer_salt, recovery_kdf_salt,
+               wrapped_vault_key_master, wrapped_vault_key_master_iv, wrapped_vault_key_master_tag,
+               wrapped_vault_key_recovery, wrapped_vault_key_recovery_iv, wrapped_vault_key_recovery_tag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                password_hash,
+                salt,
+                pbkdf2_salt,
+                recovery_question,
+                recovery_answer_hash,
+                recovery_answer_salt,
+                recovery_kdf_salt,
+                wrapped_vault_key_master,
+                wrapped_vault_key_master_iv,
+                wrapped_vault_key_master_tag,
+                wrapped_vault_key_recovery,
+                wrapped_vault_key_recovery_iv,
+                wrapped_vault_key_recovery_tag,
+            )
         )
     
     conn.commit()
@@ -103,7 +193,24 @@ def get_master_password_config() -> Optional[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT password_hash, salt, pbkdf2_salt FROM master_config LIMIT 1")
+    cursor.execute("""
+        SELECT
+            password_hash,
+            salt,
+            pbkdf2_salt,
+            recovery_question,
+            recovery_answer_hash,
+            recovery_answer_salt,
+            recovery_kdf_salt,
+            wrapped_vault_key_master,
+            wrapped_vault_key_master_iv,
+            wrapped_vault_key_master_tag,
+            wrapped_vault_key_recovery,
+            wrapped_vault_key_recovery_iv,
+            wrapped_vault_key_recovery_tag
+        FROM master_config
+        LIMIT 1
+    """)
     row = cursor.fetchone()
     conn.close()
     
@@ -111,7 +218,17 @@ def get_master_password_config() -> Optional[Dict]:
         return {
             'hash': row[0],
             'salt': row[1],
-            'pbkdf2_salt': row[2]
+            'pbkdf2_salt': row[2],
+            'recovery_question': row[3],
+            'recovery_answer_hash': row[4],
+            'recovery_answer_salt': row[5],
+            'recovery_kdf_salt': row[6],
+            'wrapped_vault_key_master': row[7],
+            'wrapped_vault_key_master_iv': row[8],
+            'wrapped_vault_key_master_tag': row[9],
+            'wrapped_vault_key_recovery': row[10],
+            'wrapped_vault_key_recovery_iv': row[11],
+            'wrapped_vault_key_recovery_tag': row[12],
         }
     return None
 

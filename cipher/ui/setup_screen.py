@@ -10,9 +10,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import crypto
-import database
 import strength
+import master_auth
 from ui import theme
 
 
@@ -35,7 +34,7 @@ class SetupScreen(ctk.CTkFrame):
     
     def _create_widgets(self):
         """Create and layout UI elements."""
-        container = ctk.CTkFrame(self, fg_color=theme.BG_PRIMARY)
+        container = ctk.CTkScrollableFrame(self, fg_color=theme.BG_PRIMARY)
         container.pack(fill="both", expand=True, padx=theme.PADDING_XLARGE,
                       pady=theme.PADDING_XLARGE)
         
@@ -62,7 +61,7 @@ class SetupScreen(ctk.CTkFrame):
         # Warning
         warning = ctk.CTkLabel(
             container,
-            text="⚠️  This password cannot be recovered if forgotten.",
+            text="⚠️  Set up recovery to reset your master password securely.",
             font=(theme.FONT_FAMILY, theme.FONT_SIZE_SMALL),
             text_color=theme.WARNING_ORANGE,
             wraplength=400
@@ -166,6 +165,51 @@ class SetupScreen(ctk.CTkFrame):
         )
         self.confirm_eye_button.pack(side="right", padx=(theme.PADDING_SMALL, 0))
         self.show_confirm = False
+
+        # Recovery question
+        recovery_label = ctk.CTkLabel(
+            container,
+            text="Recovery Security Question",
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_NORMAL),
+            text_color=theme.TEXT_PRIMARY
+        )
+        recovery_label.pack(anchor="w", pady=(theme.PADDING_XLARGE, theme.PADDING_SMALL))
+
+        self.recovery_question_var = ctk.StringVar(value=master_auth.RECOVERY_QUESTIONS[0])
+        self.recovery_question_menu = ctk.CTkOptionMenu(
+            container,
+            values=master_auth.RECOVERY_QUESTIONS,
+            variable=self.recovery_question_var,
+            fg_color=theme.BG_SECONDARY,
+            button_color=theme.ACCENT_PRIMARY,
+            button_hover_color=theme.ACCENT_DARK,
+            text_color=theme.TEXT_PRIMARY,
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_NORMAL),
+            command=self._on_recovery_question_changed,
+            height=theme.INPUT_HEIGHT
+        )
+        self.recovery_question_menu.pack(fill="x", pady=(0, theme.PADDING_NORMAL))
+
+        self.custom_question_entry = ctk.CTkEntry(
+            container,
+            placeholder_text="Enter custom recovery question",
+            **theme.get_input_config()
+        )
+
+        recovery_answer_label = ctk.CTkLabel(
+            container,
+            text="Recovery Answer",
+            font=(theme.FONT_FAMILY, theme.FONT_SIZE_NORMAL),
+            text_color=theme.TEXT_PRIMARY
+        )
+        recovery_answer_label.pack(anchor="w", pady=(0, theme.PADDING_SMALL))
+
+        self.recovery_answer_entry = ctk.CTkEntry(
+            container,
+            placeholder_text="Enter recovery answer",
+            **theme.get_input_config()
+        )
+        self.recovery_answer_entry.pack(fill="x", pady=(0, theme.PADDING_NORMAL))
         
         # Error message
         self.error_label = ctk.CTkLabel(
@@ -191,12 +235,19 @@ class SetupScreen(ctk.CTkFrame):
         
         self.create_button = ctk.CTkButton(
             button_frame,
-            text="CREATE",
+            text="OK",
             command=self._setup_master_password,
             **theme.get_button_primary_config(),
             width=150
         )
         self.create_button.pack(side="right")
+
+    def _on_recovery_question_changed(self, selected_value: str):
+        """Show custom question field only when selected."""
+        if selected_value == "Custom question":
+            self.custom_question_entry.pack(fill="x", pady=(0, theme.PADDING_NORMAL))
+        else:
+            self.custom_question_entry.pack_forget()
     
     def _toggle_visibility(self):
         """Toggle master password visibility."""
@@ -230,6 +281,10 @@ class SetupScreen(ctk.CTkFrame):
         """Create master password."""
         password = self.password_entry.get()
         confirm = self.confirm_entry.get()
+        question = self.recovery_question_var.get()
+        if question == "Custom question":
+            question = self.custom_question_entry.get().strip()
+        answer = self.recovery_answer_entry.get().strip()
         
         # Validation
         if not password:
@@ -245,18 +300,19 @@ class SetupScreen(ctk.CTkFrame):
             self.confirm_entry.delete(0, "end")
             self.confirm_entry.focus()
             return
+
+        if not question:
+            self.error_label.configure(text="Please select or enter a recovery question")
+            return
+
+        if not answer:
+            self.error_label.configure(text="Please enter recovery answer")
+            return
         
-        # Hash password
-        import os
-        salt = os.urandom(32)
-        password_hash, salt_hex = crypto.hash_master_password(password, salt)
-        
-        # Generate PBKDF2 salt for AES key derivation
-        pbkdf2_salt = os.urandom(32)
-        pbkdf2_salt_hex = pbkdf2_salt.hex()
-        
-        # Store in database
-        database.set_master_password(password_hash, salt_hex, pbkdf2_salt_hex)
+        success, message = master_auth.setup_master_password(password, question, answer)
+        if not success:
+            self.error_label.configure(text=message)
+            return
         
         self.error_label.configure(text="")
         self.on_setup_complete()
@@ -265,6 +321,10 @@ class SetupScreen(ctk.CTkFrame):
         """Called when screen is shown."""
         self.password_entry.delete(0, "end")
         self.confirm_entry.delete(0, "end")
+        self.recovery_question_var.set(master_auth.RECOVERY_QUESTIONS[0])
+        self.custom_question_entry.delete(0, "end")
+        self.custom_question_entry.pack_forget()
+        self.recovery_answer_entry.delete(0, "end")
         self.error_label.configure(text="")
         self.strength_bar.set(0)
         self.strength_label.configure(text="")

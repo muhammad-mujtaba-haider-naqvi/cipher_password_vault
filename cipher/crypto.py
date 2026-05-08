@@ -57,6 +57,16 @@ def verify_master_password(password: str, stored_hash: str, salt_hex: str) -> bo
     return hmac.compare_digest(computed_hash, stored_hash)
 
 
+def hash_password(value: str, salt: bytes = None) -> tuple[str, str]:
+    """Hash an arbitrary secret value using PBKDF2-SHA256."""
+    return hash_master_password(value, salt)
+
+
+def verify_password(value: str, stored_hash: str, salt_hex: str) -> bool:
+    """Verify an arbitrary secret value against a stored hash."""
+    return verify_master_password(value, stored_hash, salt_hex)
+
+
 # ============================================================================
 # AES KEY DERIVATION (PBKDF2HMAC from master password)
 # ============================================================================
@@ -79,6 +89,17 @@ def derive_aes_key(master_password: str, pbkdf2_salt: bytes) -> bytes:
         iterations=480000,
     )
     return kdf.derive(master_password.encode('utf-8'))
+
+
+def derive_key_from_secret(secret: str, salt: bytes, iterations: int = 480000) -> bytes:
+    """Derive a 32-byte key from any secret string using PBKDF2HMAC-SHA256."""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=iterations,
+    )
+    return kdf.derive(secret.encode('utf-8'))
 
 
 # ============================================================================
@@ -140,3 +161,29 @@ def decrypt_password(ciphertext_b64: str, iv_b64: str, tag_b64: str, aes_key: by
     plaintext = aesgcm.decrypt(iv, ciphertext + tag, None)
     
     return plaintext.decode('utf-8')
+
+
+def encrypt_bytes(data: bytes, aes_key: bytes) -> tuple[str, str, str]:
+    """Encrypt binary data with AES-256-GCM and return base64 fields."""
+    iv = os.urandom(12)
+    aesgcm = AESGCM(aes_key)
+    ciphertext_with_tag = aesgcm.encrypt(iv, data, None)
+
+    ciphertext = ciphertext_with_tag[:-16]
+    tag = ciphertext_with_tag[-16:]
+
+    return (
+        base64.b64encode(ciphertext).decode(),
+        base64.b64encode(iv).decode(),
+        base64.b64encode(tag).decode()
+    )
+
+
+def decrypt_bytes(ciphertext_b64: str, iv_b64: str, tag_b64: str, aes_key: bytes) -> bytes:
+    """Decrypt AES-256-GCM base64 fields into raw bytes."""
+    ciphertext = base64.b64decode(ciphertext_b64)
+    iv = base64.b64decode(iv_b64)
+    tag = base64.b64decode(tag_b64)
+
+    aesgcm = AESGCM(aes_key)
+    return aesgcm.decrypt(iv, ciphertext + tag, None)

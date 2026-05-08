@@ -25,6 +25,12 @@ from auth import (
     record_failed_attempt, is_locked_out, get_attempts_remaining,
     reset_attempts, unlock_session, lock_session, is_session_active
 )
+from master_auth import (
+    setup_master_password,
+    verify_master_password as verify_master_password_flow,
+    reset_with_old_password,
+    reset_with_security_question,
+)
 
 def test_crypto():
     """Test cryptographic functions."""
@@ -203,6 +209,32 @@ def test_auth():
     assert not is_session_active(), "Session should not be active after lock"
     print("✓ Session locked")
 
+
+def test_master_auth_recovery():
+    """Test first-time setup and both recovery reset paths."""
+    print("\n=== Testing Master Auth Recovery Flows ===")
+
+    success, message = setup_master_password(
+        "InitPass!234",
+        "What city were you born in?",
+        "Lahore"
+    )
+    assert success, f"Setup should succeed: {message}"
+    print("✓ First-time setup with recovery succeeded")
+
+    assert verify_master_password_flow("InitPass!234"), "Initial password verification failed"
+    print("✓ Master password verification works")
+
+    success, message = reset_with_old_password("InitPass!234", "ChangedPass!234")
+    assert success, f"Reset with old password should succeed: {message}"
+    assert verify_master_password_flow("ChangedPass!234"), "Password should verify after old-password reset"
+    print("✓ Reset with old master password works")
+
+    success, message = reset_with_security_question("Lahore", "RecoveredPass!234")
+    assert success, f"Reset with security question should succeed: {message}"
+    assert verify_master_password_flow("RecoveredPass!234"), "Password should verify after security reset"
+    print("✓ Reset with security question works")
+
 def run_all_tests():
     """Run all tests."""
     print("=" * 60)
@@ -215,6 +247,7 @@ def run_all_tests():
         test_generator()
         test_strength()
         test_auth()
+        test_master_auth_recovery()
         
         print("\n" + "=" * 60)
         print("✓ ALL TESTS PASSED")
